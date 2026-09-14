@@ -123,6 +123,7 @@ def writeMetadata(obj, type = "MAP"):
         obj["col_grArea"] = bpy.context.scene.tp3d.col_grArea
 
         obj["el_bActive"] = bpy.context.scene.tp3d.el_bActive
+        obj["el_lActive"] = bpy.context.scene.tp3d.el_lActive
         obj["el_sActive"] = any([bpy.context.scene.tp3d.el_sBigActive, bpy.context.scene.tp3d.el_sMedActive, bpy.context.scene.tp3d.el_sSmallActive, bpy.context.scene.tp3d.el_sServiceActive, bpy.context.scene.tp3d.el_sFootwaysActive])
         obj["el_sMultiplier"] = bpy.context.scene.tp3d.el_sMultiplier
         obj["el_sBigActive"] = bpy.context.scene.tp3d.el_sBigActive
@@ -193,7 +194,7 @@ def writeMetadata(obj, type = "MAP"):
 
         obj["ExportGroup"] = 0 if "SINGLECOLORMODE" in bpy.context.scene.tp3d.elementMode else 1
 
-    if type == "BUILDINGS" or type == "ROADS":
+    if type == "BUILDINGS" or type == "ROADS" or type == "LANDMARKS":
 
         obj["Object type"] = type
         obj["Addon"] = const.ADDON_NAME

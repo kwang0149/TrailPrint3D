@@ -44,6 +44,7 @@ def setupColors():
     _setup_material("BLACK",     (0.0,  0.0,  0.0,  1.0))
     _setup_material("WHITE",     (1.0,  1.0,  1.0,  1.0))
     _setup_material("BUILDINGS", (0.4,  0.4,  0.4,  1.0))
+    _setup_material("LANDMARKS", (0.95, 0.55, 0.05, 1.0))
     _setup_material("FARMLAND",  (0.3,  0.5,  0.1,  1.0))
 
 def create_curve_from_coordinates(coordinates):

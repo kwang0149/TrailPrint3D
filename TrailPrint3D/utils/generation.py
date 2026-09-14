@@ -461,6 +461,8 @@ def _rg_start_osm_prefetch(tp3d, map_km):
     ]
     if tp3d.el_bActive == 1 and map_km <= const.BUILDINGS_MAXSIZE:
         _active_kind_tasks.append(("BUILDINGS", _tile_tasks))
+    if tp3d.el_lActive == 1 and map_km <= const.LANDMARKS_MAXSIZE:
+        _active_kind_tasks.append(("LANDMARKS", _tile_tasks))
     if any([tp3d.el_sBigActive, tp3d.el_sMedActive, tp3d.el_sSmallActive, tp3d.el_sServiceActive, tp3d.el_sFootwaysActive]) and map_km <= const.ROADS_MAXSIZE:
         _active_kind_tasks.append(("STREETS", _tile_tasks))
     if tp3d.el_oActive == 1 and map_km <= const.COASTLINE_MAXSIZE:
@@ -497,6 +499,7 @@ def _rg_build_terrain_elements(obj, scaleHor, curveObj=None, phase_start=0.83, p
     )
     from .osm.buildings import create_buildings
     from .osm.fetch_utils import OsmFetchSettings
+    from .osm.landmarks import create_landmarks
     from .osm.roads import create_roads
     from .scene import set_origin_to_3d_cursor
     from .terrain import (  # deferred to avoid circular import at load time
@@ -534,6 +537,7 @@ def _rg_build_terrain_elements(obj, scaleHor, curveObj=None, phase_start=0.83, p
         [flag for _, flag, size, _, _ in COLORING_ELEMENTS if (flag(tp3d) if callable(flag) else getattr(tp3d, flag) == 1) and map_km <= size]
         + (['_ocean']    if tp3d.el_oActive == 1 and map_km <= const.COASTLINE_MAXSIZE else [])
         + (['_buildings'] if tp3d.el_bActive == 1 and map_km <= const.BUILDINGS_MAXSIZE else [])
+        + (['_landmarks'] if tp3d.el_lActive == 1 and map_km <= const.LANDMARKS_MAXSIZE else [])
         + (['_roads']    if any([tp3d.el_sBigActive, tp3d.el_sMedActive, tp3d.el_sSmallActive, tp3d.el_sServiceActive, tp3d.el_sFootwaysActive]) and map_km <= const.ROADS_MAXSIZE else [])
     )
     _total_active = max(len(_active_elem_flags), 1)
@@ -592,6 +596,8 @@ def _rg_build_terrain_elements(obj, scaleHor, curveObj=None, phase_start=0.83, p
             if (flag_attr(tp3d) if callable(flag_attr) else getattr(tp3d, flag_attr) == 1)
             and map_km <= max_size
         ]
+        if tp3d.el_lActive == 1 and map_km <= const.LANDMARKS_MAXSIZE:
+            _active_kind_tasks.append(("LANDMARKS", _tile_tasks))
         _all_prefetched = _fetch_all_kinds_parallel(_active_kind_tasks, _overpass_semaphore,
                                                     settings=_fetch_settings)
     else:
@@ -609,6 +615,8 @@ def _rg_build_terrain_elements(obj, scaleHor, curveObj=None, phase_start=0.83, p
         # in COLORING_ELEMENTS, so mark them ready here too.
         if tp3d.el_bActive == 1 and map_km <= const.BUILDINGS_MAXSIZE and _all_prefetched.get('BUILDINGS'):
             _ov.set_fetch_ready('buildings')
+        if tp3d.el_lActive == 1 and map_km <= const.LANDMARKS_MAXSIZE and _all_prefetched.get('LANDMARKS'):
+            _ov.set_fetch_ready('landmarks')
         if any([tp3d.el_sBigActive, tp3d.el_sMedActive, tp3d.el_sSmallActive, tp3d.el_sServiceActive, tp3d.el_sFootwaysActive]) and map_km <= const.ROADS_MAXSIZE and _all_prefetched.get('STREETS'):
             _ov.set_fetch_ready('roads')
         if tp3d.el_oActive == 1 and map_km <= const.COASTLINE_MAXSIZE and _all_prefetched.get('COASTLINE'):
@@ -710,6 +718,29 @@ def _rg_build_terrain_elements(obj, scaleHor, curveObj=None, phase_start=0.83, p
         else:
             print("INFO: MAP IS TOO BIG FOR BUILDINGS (< 10Km Map size Required)")
             _progress.WarningsOverlay.add_warning("Map too big for Buildings.", "warn")
+
+    # --------------------------------------------------
+    # Landmarks — same pattern as buildings (own creation function).
+    # --------------------------------------------------
+    terrain['landmarks'] = None
+    if tp3d.el_lActive == 1:
+        if map_km <= const.LANDMARKS_MAXSIZE:
+            _advance_elem_progress("Landmarks", "Fetching landmark data…")
+            _ov.set_fetch_progress('landmarks', 0.0)
+            _ov.set_fetch_ready('landmarks')
+            landmarks = create_landmarks(obj, 10, scaleHor)
+
+            if landmarks is not None:
+                # Landmarks are already clipped to the map shape in 2D inside
+                # create_landmarks, so no 3D boolean clip is needed here.
+                set_origin_to_3d_cursor(landmarks)
+                landmarks.name = obj.name + "_" + "LANDMARKS"
+                terrain['landmarks'] = landmarks
+                writeMetadata(landmarks, type="LANDMARKS")
+            _ov.set_fetch_done('landmarks', success=landmarks is not None)
+        else:
+            print("INFO: MAP IS TOO BIG FOR LANDMARKS (< 150Km Map size Required)")
+            _progress.WarningsOverlay.add_warning("Map too big for Landmarks.", "warn")
 
     # --------------------------------------------------
     # Roads — own creation function + clipping + material post-processing.
@@ -1026,6 +1057,16 @@ def _rg_apply_single_color_mode(obj, curveObjs, terrain, props):
                 solver = 'MANIFOLD' if (is_mesh_manifold(elem_obj) and is_mesh_manifold(tcrv)) else 'EXACT'
                 boolean_operation(elem_obj, tcrv, solver=solver)
 
+        # Landmarks sit on top of the terrain like buildings — same treatment.
+        elem_obj = terrain.get('landmarks')
+        if elem_obj is not None:
+            _ov = _progress.ProgressOverlay.get()
+            if _ov.active:
+                _ov.update(message="Subtracting trail from Landmarks…")
+            for tcrv in thickerCurves:
+                solver = 'MANIFOLD' if (is_mesh_manifold(elem_obj) and is_mesh_manifold(tcrv)) else 'EXACT'
+                boolean_operation(elem_obj, tcrv, solver=solver)
+
     # Rebuild the road top surface from the terrain-grid cache captured before
     # any of the cuts above, so it shares the exact terrain/element resolution.
     roads_obj = terrain.get('roads')
@@ -1176,10 +1217,10 @@ def _rg_export(obj, curveObjs, textobj, plateobj, props, buggyDataset, start_tim
 
         if elements and (props.get('elementMode') == "SEPARATE" or "SINGLECOLORMODE" in props.get('elementMode')):
             for elem_obj in elements.values():
-                if elem_obj and elem_obj.name in bpy.data.objects:
+                if elem_obj and getattr(elem_obj, "name", None) in bpy.data.objects:
                     elem_obj.select_set(True)
         elif elements and props.get('elementMode') == "PAINT":
-            for key in ("roads", "buildings"):
+            for key in ("roads", "buildings", "landmarks"):
                 elem_obj = elements.get(key)
                 if elem_obj and elem_obj.name in bpy.data.objects:
                     elem_obj.select_set(True)
@@ -1203,7 +1244,7 @@ def _rg_export(obj, curveObjs, textobj, plateobj, props, buggyDataset, start_tim
 
         if elements and (props.get('elementMode') == "SEPARATE" or "SINGLECOLORMODE" in props.get('elementMode')):
             for elem_obj in elements.values():
-                if elem_obj and elem_obj.name in bpy.data.objects:
+                if elem_obj and getattr(elem_obj, "name", None) in bpy.data.objects:
                     export_to_STL(elem_obj, exportformat)
 
         if shape in {"HEXAGON INNER TEXT", "HEXAGON OUTER TEXT", "OCTAGON OUTER TEXT", "HEXAGON FRONT TEXT", "CIRCLE OUTER TEXT"} and textobj:
@@ -1273,6 +1314,7 @@ def build_fetch_items(map_km=None):
         ('farmland',   'col_faActive',  const.FARMLAND_MAXSIZE,    'A', 'Farm'),
         ('glacier',    'col_glActive',  const.GLACIER_MAXSIZE,     'I', 'Glacr'),
         ('buildings',  'el_bActive',    const.BUILDINGS_MAXSIZE,   'B', 'Build'),
+        ('landmarks',  'el_lActive',    const.LANDMARKS_MAXSIZE,   'L', 'Landm'),
         ('roads',      None,            const.ROADS_MAXSIZE,       'R', 'Roads'),
     ]
     for key, flag, max_size, icon, label in defs:

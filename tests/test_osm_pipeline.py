@@ -656,6 +656,53 @@ def test_real_overpass_classifier():
         print(f"    {kind:12s}: {len(ways)} ways/relations — all correctly classified")
 
 
+def test_real_overpass_landmarks():
+    """LANDMARKS fetch must return landmark elements, and every tagged
+    way/relation must round-trip through the classifier as a landmark."""
+    import threading
+
+    from TrailPrint3D.utils.osm.fetch_group import _classify_element, fetch_osm_combined
+
+    settings = _munich_settings(disable_cache=False)
+    result = fetch_osm_combined(
+        _MUNICH_BBOX,
+        ["LANDMARKS"],
+        settings=settings,
+        semaphore=threading.Semaphore(1),
+    )
+
+    assert "LANDMARKS" in result, f"LANDMARKS missing from result — got: {list(result.keys())}"
+    data, _ = result["LANDMARKS"]
+    elements = data.get("elements", [])
+    ways = [e for e in elements if e.get("type") != "node"]
+    assert ways, "LANDMARKS returned no ways/relations — check query filters"
+    wrong = [
+        e for e in ways
+        if e.get("tags") and _classify_element(e, ["LANDMARKS"], settings) != "LANDMARKS"
+    ]
+    assert not wrong, (
+        f"{len(wrong)} landmark way(s) failed round-trip classification. "
+        f"First offender tags: {wrong[0].get('tags', {})}"
+    )
+    print(f"    LANDMARKS: {len(ways)} ways/relations, {len(elements)} elements — classified correctly")
+
+
+def test_has_landmark_tags_unit():
+    """Shared tag helper must accept known landmark tags and reject noise."""
+    from TrailPrint3D.utils.osm.landmarks import has_landmark_tags
+
+    assert has_landmark_tags({"tourism": "attraction"})
+    assert has_landmark_tags({"historic": "castle"})
+    assert has_landmark_tags({"man_made": "lighthouse"})
+    assert has_landmark_tags({"leisure": "stadium"})
+    assert has_landmark_tags({"man_made": "tower", "height": "250"})
+    assert has_landmark_tags({"man_made": "tower", "tower:type": "communication"})
+    assert not has_landmark_tags({"man_made": "tower", "height": "5"})
+    assert not has_landmark_tags({"man_made": "tower"})
+    assert not has_landmark_tags({"building": "yes"})
+    assert not has_landmark_tags({"highway": "residential"})
+
+
 # ---------------------------------------------------------------------------
 # Multi-kind parallel fetcher — _fetch_all_kinds_parallel
 # ---------------------------------------------------------------------------
@@ -1123,8 +1170,12 @@ if __name__ == "__main__":
     if _RUN_LIVE_OVERPASS:
         _run("live overpass: union query accepted by server", test_real_overpass_union_query)
         _run("live overpass: classifier bins Munich elements",test_real_overpass_classifier)
+        _run("live overpass: landmarks fetch + classification", test_real_overpass_landmarks)
     else:
         print("  SKIP  live overpass tests (pass -- --overpass to run_all_tests.py to enable)")
+
+    # Landmark tag helper — pure unit test (no network)
+    _run("landmarks: has_landmark_tags accepts/rejects",      test_has_landmark_tags_unit)
 
     # Coastline pipeline — unit tests (no network, no bpy objects)
     _run("coastline stitch: empty input",                         test_stitch_empty_input)

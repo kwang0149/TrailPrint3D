@@ -182,6 +182,19 @@ def _build_union_query(south, west, north, east, kinds, settings=None):
     if "BUILDINGS" in kinds:
         filters.append('nwr["building"]')
 
+    if "LANDMARKS" in kinds:
+        filters += [
+            'nwr["tourism"~"^(attraction|artwork)$"]',
+            'nwr["historic"~"^(monument|memorial|castle|ruins|fort|manor|tower|city_gate|arch)$"]',
+            'nwr["man_made"~"^(lighthouse|water_tower|obelisk)$"]',
+            'nwr["leisure"="stadium"]',
+            'nwr["building"~"^(cathedral|basilica)$"]',
+            'nwr["amenity"="fountain"]',
+            'nwr["natural"="peak"]',
+            'nwr["man_made"="tower"]["height"](if:number(t["height"])>=20)',
+            'nwr["man_made"="tower"]["tower:type"~"^(observation|lighting|communication)$"]',
+        ]
+
     if "STREETS" in kinds:
         all_big = {"primary", "motorway", "primary_link", "motorway_link"}
         all_med = {
@@ -305,6 +318,14 @@ def _classify_element(element, active_kinds, settings=None):
                     in {"alley", "driveway", "parking_aisle", "drive-through"}
                 ):
                     return "STREETS"
+
+    # LANDMARKS — checked BEFORE buildings so landmark-tagged buildings
+    # (cathedrals, stadiums, castles...) are bucketed as landmarks.
+    if "LANDMARKS" in active_kinds:
+        from .landmarks import has_landmark_tags  # deferred — mirrors the shared tag set
+
+        if has_landmark_tags(tags):
+            return "LANDMARKS"
 
     # BUILDINGS — anything with a building=* tag
     if "BUILDINGS" in active_kinds and tags.get("building"):
@@ -501,6 +522,13 @@ def fetch_osm_combined(
     per_kind: dict = {kind: {"elements": []} for kind in missing}
     for element in elements:
         if element.get("type") == "node":
+            # Node-only landmarks (attractions, monuments, peaks...) carry no
+            # ways, so they must be classified from their own tags here.
+            if "LANDMARKS" in missing:
+                from .landmarks import has_landmark_tags  # deferred
+
+                if has_landmark_tags(element.get("tags", {}) or {}):
+                    per_kind["LANDMARKS"]["elements"].append(element)
             continue
         kind = _classify_element(element, missing, settings)
         if kind is not None:

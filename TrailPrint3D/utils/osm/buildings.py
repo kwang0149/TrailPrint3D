@@ -72,10 +72,12 @@ def _build_terrain_height_sampler(
     return sample
 
 
-def _append_building(poly, z_offset, sample_z, b_verts, b_faces):
+def _append_building(poly, z_offset, sample_z, b_verts, b_faces, roof="FLAT", roof_frac=0.15):
     # poly: shapely Polygon (single, possibly with holes). Builds a manifold
     # prism with a flat floor at the lowest terrain point under the footprint
     # and a flat roof at the highest terrain point + height.
+    # roof="PYRAMID" collapses the top cap into a single apex raised by
+    # roof_frac * z_offset above the prism, giving tower-like silhouettes.
     ext = list(poly.exterior.coords)
     if len(ext) > 1 and ext[0] == ext[-1]:
         ext = ext[:-1]
@@ -104,11 +106,28 @@ def _append_building(poly, z_offset, sample_z, b_verts, b_faces):
         b_verts.append((vx, vy, z_min))
     for vx, vy in verts2d:
         b_verts.append((vx, vy, z_top))
-    for ia, ib, ic in cap_tris:
-        b_faces.append([base + ic, base + ib, base + ia])  # floor (down)
-        b_faces.append(
-            [base + n2 + ia, base + n2 + ib, base + n2 + ic]
-        )  # roof (up)
+    if roof == "PYRAMID":
+        cx = sum(v[0] for v in verts2d) / n2
+        cy = sum(v[1] for v in verts2d) / n2
+        apex = len(b_verts)
+        b_verts.append((cx, cy, z_top + z_offset * roof_frac))
+        for ia, ib, ic in cap_tris:
+            b_faces.append([base + ic, base + ib, base + ia])  # floor (down)
+        # Top: apex triangles around every ring (exterior first, then holes).
+        start = 0
+        for ring in [ext] + holes:
+            rn = len(ring)
+            for i in range(rn):
+                a = base + n2 + start + i
+                b = base + n2 + start + (i + 1) % rn
+                b_faces.append([a, b, apex])
+            start += rn
+    else:
+        for ia, ib, ic in cap_tris:
+            b_faces.append([base + ic, base + ib, base + ia])  # floor (down)
+            b_faces.append(
+                [base + n2 + ia, base + n2 + ib, base + n2 + ic]
+            )  # roof (up)
     # Walls around the exterior ring and each hole. Ring ranges follow
     # earcut's vertex order (exterior first, then holes).
     start = 0
@@ -133,25 +152,44 @@ def buildings_geometry_for_polygon(piece_polygon, buildings_data):
     """
     footprints, sample_z = buildings_data
     b_verts, b_faces = [], []
-    for poly, z_offset in footprints:
+    for item in footprints:
+        poly, z_offset, *roof_info = item
+        roof = roof_info[0] if roof_info else "FLAT"
+        roof_frac = roof_info[1] if len(roof_info) > 1 else 0.15
         clipped = g2d.validate(poly.intersection(piece_polygon))
         if clipped is None or clipped.is_empty:
             continue
         for part in g2d.iter_polygons(clipped):
-            _append_building(part, z_offset, sample_z, b_verts, b_faces)
+            _append_building(
+                part, z_offset, sample_z, b_verts, b_faces,
+                roof=roof, roof_frac=roof_frac,
+            )
     if not b_verts:
         return None, None
     return b_verts, b_faces
 
 
-def create_buildings(map, default_height=10, scaleHor=1.0):
+def safe_float_height(h, default_height=10.0):
+    """Parse an OSM height/levels value, stripping units like 'm'."""
+    if h is None:
+        return float(default_height)
+    if isinstance(h, (int, float)):
+        return float(h)
+    try:
+        s = str(h).strip().lower()
+        if s.endswith("m"):
+            s = s[:-1].strip()
+        return float(s)
+    except (ValueError, TypeError):
+        return float(default_height)
 
-    # Mercator scale used by convert_to_blender_coordinates (it reads sScaleHor
-    # from the scene). Read once so the vectorized node conversion matches.
-    _sScaleHor = bpy.context.scene.tp3d.sScaleHor
-    _t_setup = time.time()
 
-    # Copy map and extrude vertical faces outward
+def _make_terrain_sampler(map):
+    """Copy the map, extrude its walls, build a BVH and bake a terrain height
+    sampler grid for fast vectorized Z lookups.
+
+    Returns (wall_obj, sample_z). The caller must remove wall_obj when done.
+    """
     wall_obj = map.copy()
     wall_obj.data = map.data.copy()
     bpy.context.collection.objects.link(wall_obj)
@@ -181,10 +219,6 @@ def create_buildings(map, default_height=10, scaleHor=1.0):
     terrain_bvh = BVHTree.FromBMesh(bm_bvh)
     bm_bvh.free()
 
-    _ov = _progress.ProgressOverlay.get()
-    if _ov.active:
-        _ov.set_fetch_progress("buildings", 0.0)
-
     minThickness = bpy.context.scene.tp3d.minThickness
 
     _mc = [map.matrix_world @ Vector(c) for c in map.bound_box]
@@ -196,6 +230,23 @@ def create_buildings(map, default_height=10, scaleHor=1.0):
     _sample_z = _build_terrain_height_sampler(
         terrain_bvh, _x_min, _x_max, _y_min, _y_max, _z_cast, minThickness
     )
+    return wall_obj, _sample_z
+
+
+def create_buildings(map, default_height=10, scaleHor=1.0):
+
+    # Mercator scale used by convert_to_blender_coordinates (it reads sScaleHor
+    # from the scene). Read once so the vectorized node conversion matches.
+    _sScaleHor = bpy.context.scene.tp3d.sScaleHor
+    _t_setup = time.time()
+
+    # Copy map and extrude vertical faces outward, then bake the terrain
+    # height sampler (shared with landmarks.py).
+    wall_obj, _sample_z = _make_terrain_sampler(map)
+
+    _ov = _progress.ProgressOverlay.get()
+    if _ov.active:
+        _ov.set_fetch_progress("buildings", 0.0)
 
     minLat = bpy.context.scene.tp3d.minLat
     minLon = bpy.context.scene.tp3d.minLon
@@ -212,6 +263,8 @@ def create_buildings(map, default_height=10, scaleHor=1.0):
     # jigsaw seams.
     _puzzle_footprints = []
     b_height_mult = bpy.context.scene.tp3d.el_bHeightMultiplier
+    b_roof = getattr(bpy.context.scene.tp3d, "el_bRoofStyle", "FLAT")
+    b_roof_frac = max(0.0, min(1.0, getattr(bpy.context.scene.tp3d, "el_bRoofHeight", 15.0) / 100.0))
 
     # Clip footprints to the map outline in 2D so buildings never spill past the
     # map edge -- robust, unlike a 3D boolean against a non-manifold building mesh.
@@ -305,21 +358,6 @@ def create_buildings(map, default_height=10, scaleHor=1.0):
                         node_xy[nid] = (x, y, nlat, nlon)
                 _t_convert += time.time() - _t0
 
-                def safe_float_height(h):
-                    # supports strings like "10", "10.0", "10 m"
-                    if h is None:
-                        return float(default_height)
-                    if isinstance(h, (int, float)):
-                        return float(h)
-                    try:
-                        s = str(h).strip().lower()
-                        # strip units like "m"
-                        if s.endswith("m"):
-                            s = s[:-1].strip()
-                        return float(s)
-                    except (ValueError, TypeError):
-                        return float(default_height)
-
                 # Build a lookup for ways by id, so relations can reference them
                 ways_by_id = {
                     e["id"]: e for e in data["elements"] if e["type"] == "way"
@@ -362,8 +400,8 @@ def create_buildings(map, default_height=10, scaleHor=1.0):
                     if len(footprint) < 3:
                         continue
 
-                    height = safe_float_height(tags.get("height", default_height))
-                    levels = safe_float_height(tags.get("building:levels", 0))
+                    height = safe_float_height(tags.get("height"), default_height)
+                    levels = safe_float_height(tags.get("building:levels"), 0)
                     if levels != 0:
                         height = levels * 2.7
 
@@ -382,8 +420,11 @@ def create_buildings(map, default_height=10, scaleHor=1.0):
 
                     # Each (clipped) polygon part becomes its own manifold prism.
                     for part in g2d.iter_polygons(poly, min_area=min_area):
-                        _puzzle_footprints.append((part, z_offset))
-                        _append_building(part, z_offset, _sample_z, b_verts, b_faces)
+                        _puzzle_footprints.append((part, z_offset, b_roof, b_roof_frac))
+                        _append_building(
+                            part, z_offset, _sample_z, b_verts, b_faces,
+                            roof=b_roof, roof_frac=b_roof_frac,
+                        )
 
                 _t_geom += time.time() - _t0
 

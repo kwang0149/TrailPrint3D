@@ -201,6 +201,7 @@ select option{background:#2e2e2e}
     <label class="tgl" data-id="cities"><input type="checkbox" id="cities"><span>City Bounds</span></label>
     <label class="tgl" data-id="greenspace"><input type="checkbox" id="greenspace"><span>Greenspaces</span></label>
     <label class="tgl" data-id="buildings"><input type="checkbox" id="buildings"><span>Buildings</span></label>
+    <label class="tgl" data-id="landmarks"><input type="checkbox" id="landmarks"><span>Landmarks</span></label>
     <label class="tgl" data-id="roads_big"><input type="checkbox" id="roads_big"><span>Major Roads</span></label>
     <label class="tgl" data-id="roads_med"><input type="checkbox" id="roads_med"><span>Secondary Roads</span></label>
     <label class="tgl" data-id="roads_small"><input type="checkbox" id="roads_small"><span>Small Roads</span></label>
@@ -287,6 +288,7 @@ function getConfig(){
     cities:document.getElementById('cities').checked,
     greenspace:document.getElementById('greenspace').checked,
     buildings:document.getElementById('buildings').checked,
+    landmarks:document.getElementById('landmarks').checked,
     roads_big:document.getElementById('roads_big').checked,
     roads_med:document.getElementById('roads_med').checked,
     roads_small:document.getElementById('roads_small').checked,

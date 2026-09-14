@@ -509,6 +509,7 @@ _ICON_MAP = {
     'forest':     'prog_forest.svg',
     'roads':      'prog_road.svg',
     'buildings':  'prog_building.svg',
+    'landmarks':  'prog_building.svg',
     'scree':      'prog_scree.svg',
     'greenspace': 'prog_greenspace.svg',
     'farmland':   'prog_farmland.svg',

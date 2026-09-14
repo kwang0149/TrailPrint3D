@@ -73,6 +73,7 @@ def apply_config(cfg: dict):
     tp3d.col_cActive            = bool(cfg.get("cities", False))
     tp3d.col_grActive           = bool(cfg.get("greenspace", False))
     tp3d.el_bActive             = bool(cfg.get("buildings", False))
+    tp3d.el_lActive             = bool(cfg.get("landmarks", False))
     tp3d.el_sBigActive          = bool(cfg.get("roads_big", False))
     tp3d.el_sMedActive          = bool(cfg.get("roads_med", False))
     tp3d.el_sSmallActive        = bool(cfg.get("roads_small", False))

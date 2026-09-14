@@ -360,7 +360,21 @@ class TP3D_PT_advanced(bpy.types.Panel):
             row.prop(props, "el_bActive")
             row.prop(props, "el_bHeightMultiplier")
             sub.prop(props, "el_bMinPrintMM")
+            row = sub.row(align=True)
+            row.prop(props, "el_bRoofStyle")
+            if props.el_bRoofStyle == "PYRAMID":
+                row.prop(props, "el_bRoofHeight")
             #sub.operator("tp3d.remake_buildings", icon='FILE_REFRESH')
+
+            sub = box.box()
+            sub.label(text=_("Landmarks"), icon='LIGHT_SUN')
+            row = sub.row(align=True)
+            row.prop(props, "el_lActive")
+            row.prop(props, "el_lHeightMultiplier")
+            row = sub.row(align=True)
+            row.prop(props, "el_lBaseMM")
+            row.prop(props, "el_lNodeHeightMM")
+            sub.prop(props, "el_lMaxNodes")
 
             sub = box.box()
             row = sub.row()
@@ -378,6 +392,7 @@ class TP3D_PT_advanced(bpy.types.Panel):
                 row = sub.row(align=True)
                 row.prop(props, "el_sMultiplier")
                 row.prop(props, "el_sHeight")
+                sub.prop(props, "el_sMinWidthMM")
                 if props.elementMode != "PAINT":
                     sub.prop(props, "el_sCutTolerance")
                 if props.el_sServiceActive:
@@ -402,6 +417,23 @@ class TP3D_PT_advanced(bpy.types.Panel):
             if props.pinCutout:
                 box.prop(props, "pinCutoutClearance")
                 draw_wrapped_label(box, context, _("New pins cut a socket into the map and elements at their position"))
+
+        # --- 3D MODELS ---
+        layout.prop(props, "show_models", icon="TRIA_DOWN" if props.show_models else "TRIA_RIGHT", emboss=False)
+        if props.show_models:
+            box = layout.box()
+            row = box.row(align=True)
+            row.prop(props, "mdlPath")
+            row.operator("tp3d.import_model_at_gps", text=_("Place at GPS"), icon="IMPORT")
+            col = box.column(align=True)
+            col.prop(props, "mdlLat")
+            col.prop(props, "mdlLon")
+            row = box.row(align=True)
+            row.prop(props, "mdlScale")
+            row.prop(props, "mdlDrapeToTerrain", icon="CHECKBOX_HLT" if props.mdlDrapeToTerrain else "CHECKBOX_DEHLT")
+            if not props.mdlDrapeToTerrain:
+                box.prop(props, "mdlHeight")
+            draw_wrapped_label(box, context, _("Imports an STL/OBJ landmark and seats it on the map surface at its GPS position"))
 
         # --- SPECIAL ---
         layout.prop(props, "show_special", icon="TRIA_DOWN" if props.show_special else "TRIA_RIGHT", emboss=False)

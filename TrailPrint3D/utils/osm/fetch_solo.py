@@ -234,6 +234,23 @@ def fetch_osm_data(
                 'nwr["building"]',
             ],
         ),
+        "LANDMARKS": lambda s, w, n, e, **_: _simple_query(
+            s,
+            w,
+            n,
+            e,
+            [
+                'nwr["tourism"~"^(attraction|artwork)$"]',
+                'nwr["historic"~"^(monument|memorial|castle|ruins|fort|manor|tower|city_gate|arch)$"]',
+                'nwr["man_made"~"^(lighthouse|water_tower|obelisk)$"]',
+                'nwr["leisure"="stadium"]',
+                'nwr["building"~"^(cathedral|basilica)$"]',
+                'nwr["amenity"="fountain"]',
+                'nwr["natural"="peak"]',
+                'nwr["man_made"="tower"]["height"](if:number(t["height"])>=20)',
+                'nwr["man_made"="tower"]["tower:type"~"^(observation|lighting|communication)$"]',
+            ],
+        ),
         "STREETS": lambda s, w, n, e, mapsize=0, big=True, med=True, small=False, exclude_alleys=True, footways=False, service=False, **_: (
             _build_streets_query(
                 s, w, n, e, mapsize, big, med, small, exclude_alleys, footways, service

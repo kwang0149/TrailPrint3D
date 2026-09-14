@@ -1315,7 +1315,7 @@ def _bevel_bottom_edges(obj, bevel_width):
     bpy.ops.object.mode_set(mode='OBJECT')
 
 
-def cut_into_puzzle_pieces(terrain_obj, pieces, tolerance_mm=0.3, roads_data=None, buildings_data=None):
+def cut_into_puzzle_pieces(terrain_obj, pieces, tolerance_mm=0.3, roads_data=None, buildings_data=None, landmarks_data=None):
     """Cut a single finished map tile into separate jigsaw puzzle piece objects.
 
     `terrain_obj` -- a normal, already-generated (and trail-merged, if
@@ -1489,6 +1489,25 @@ def cut_into_puzzle_pieces(terrain_obj, pieces, tolerance_mm=0.3, roads_data=Non
                 bpy.context.collection.objects.link(b_piece)
                 bpy.ops.object.select_all(action='DESELECT')
                 b_piece.select_set(True)
+                piece_obj.select_set(True)
+                bpy.context.view_layer.objects.active = piece_obj
+                bpy.ops.object.join()
+
+        if landmarks_data is not None:
+            from .osm.landmarks import landmarks_geometry_for_polygon  # deferred to avoid circular import
+            l_verts, l_faces = landmarks_geometry_for_polygon(poly, landmarks_data)
+            if l_verts:
+                l_mesh = bpy.data.meshes.new(f"_landmarks_{row}_{col}")
+                l_mesh.from_pydata(l_verts, [], l_faces)
+                l_mesh.update()
+                l_mesh.validate(verbose=False)
+                landmarks_mat = bpy.data.materials.get("LANDMARKS")
+                if landmarks_mat:
+                    l_mesh.materials.append(landmarks_mat)
+                l_piece = bpy.data.objects.new(l_mesh.name, l_mesh)
+                bpy.context.collection.objects.link(l_piece)
+                bpy.ops.object.select_all(action='DESELECT')
+                l_piece.select_set(True)
                 piece_obj.select_set(True)
                 bpy.context.view_layer.objects.active = piece_obj
                 bpy.ops.object.join()

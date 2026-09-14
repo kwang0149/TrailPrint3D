@@ -481,8 +481,23 @@ class TP3D_PG_properties(bpy.types.PropertyGroup):
     el_bActive: BoolProperty(name= _("Include Buildings"), default=False, description = _("For Maps < 5Km Reccomended")) # type: ignore
     el_bHeightMultiplier: FloatProperty(name= _("Height Multiplier"), default=1.0, min=0.01, soft_max=10.0, description=_("Multiplies building height")) # type: ignore
     el_bMinPrintMM: FloatProperty(name= _("Min Footprint (mm)"), default=0.15, min=0.0, soft_max=5.0, precision=2, description=_("Buildings whose printed footprint side is smaller than this (in model mm) are skipped. Scale-aware: a larger real-world building on a bigger-km map prints smaller, so this threshold naturally culls more on larger maps.")) # type: ignore
+    el_bRoofStyle: EnumProperty(
+        name=_("Roof Style"),
+        items=[
+            ('FLAT', _("Flat"), _("Flat roof on every building")),
+            ('PYRAMID', _("Pyramid"), _("Collapse each roof into a raised peak (tower-like skyline)")),
+        ],
+        default='FLAT'
+    )# type: ignore
+    el_bRoofHeight: FloatProperty(name=_("Roof Height"), default=15.0, min=0.0, max=100.0, subtype='PERCENTAGE', description=_("Pyramid roof peak height as a percentage of the building's own height")) # type: ignore
+    el_lActive: BoolProperty(name= _("Include Landmarks"), default=False, description = _("OSM attractions, monuments, castles, cathedrals, stadiums, lighthouses, peaks and towers. Area landmarks get their real footprints, point landmarks become small markers. For Maps < 150Km Recommended")) # type: ignore
+    el_lHeightMultiplier: FloatProperty(name= _("Height Multiplier"), default=2.0, min=0.01, soft_max=10.0, description=_("Multiplies landmark height so they stand out above surrounding buildings")) # type: ignore
+    el_lBaseMM: FloatProperty(name= _("Point Base Size (mm)"), default=1.0, min=0.1, soft_max=10.0, precision=1, description=_("Printed base diameter of markers for point landmarks without a footprint")) # type: ignore
+    el_lNodeHeightMM: FloatProperty(name= _("Min Marker Height (mm)"), default=2.0, min=0.0, soft_max=20.0, precision=1, description=_("Minimum printed height of point landmark markers")) # type: ignore
+    el_lMaxNodes: IntProperty(name= _("Max Point Landmarks"), default=150, min=0, soft_max=1000, description=_("Cap on point landmark markers per map (tallest kept first). 0 = unlimited")) # type: ignore
 
     el_sMultiplier: FloatProperty(name= _("Road Width Multiplier"), default = 1, description = _("To make Roads thicker or thinner")) # type: ignore
+    el_sMinWidthMM: FloatProperty(name= _("Min Road Width (mm)"), default = 0.2, min=0.0, soft_max=5.0, precision=2, description=_("Minimum printed half-width roads are clamped to. Raise for chunkier, more printable streets on city maps")) # type: ignore
     el_sHeight: FloatProperty(name= _("Road Height"), default = 0.4, min=0.0, description = _("Height of road geometry above terrain")) # type: ignore
     el_sCutTolerance: FloatProperty(name= _("Road Cutout Tolerance"), default = 0.2, min=0.0, description = _("Extra clearance added around roads when cutting their footprint out of terrain/elements in SEPARATE/SingleColorMode, so the printed road piece seats without an overly tight fit. Same idea as Tolerance Elements, but for roads.")) # type: ignore
     el_sExcludeAlleys: BoolProperty(name= _("Exclude Alleys/Driveways"), default=True, description = _("Drops OSM highway=service ways explicitly tagged service=alley, service=driveway, service=parking_aisle, or service=drive-through -- the actual back-alley/driveway/parking-lot clutter -- while keeping plain service roads. Uses OSM's own tagging instead of guessing from geometry (a single street is often split into many short ways at every intersection, so filtering by length would wrongly cull real streets too).")) # type: ignore
@@ -538,6 +553,14 @@ class TP3D_PG_properties(bpy.types.PropertyGroup):
 
     pinCutout: BoolProperty(name= _("Pin Cutout"), default=False, description=_("When placing a pin, also cut a matching socket into the map and elements at the pin's position, so the printed pin can be inserted afterward")) # type: ignore
     pinCutoutClearance: FloatProperty(name= _("Cutout Clearance"), default=0.2, min=0.0, soft_max=2.0, description=_("Extra size added to the cutout so the printed pin actually fits into the socket")) # type: ignore
+
+    show_models: BoolProperty(name= _("3D Models"), default=False) # type: ignore
+    mdlPath: StringProperty(name=_("Model File"), default="", subtype='FILE_PATH', description=_("STL or OBJ file placed at the given GPS coordinates")) # type: ignore
+    mdlLat: FloatProperty(name= _("Latitude"), default = 48.00) # type: ignore
+    mdlLon: FloatProperty(name= _("Longitude"), default = 8.00) # type: ignore
+    mdlScale: FloatProperty(name= _("Scale"), default = 1.0, min=0.001, soft_max=100.0, description=_("Uniform scale applied to the imported model")) # type: ignore
+    mdlDrapeToTerrain: BoolProperty(name= _("Drape to Terrain"), default=True, description=_("Drop the model onto the map surface at its GPS position. Disable to place at the given height")) # type: ignore
+    mdlHeight: FloatProperty(name= _("Height"), default = 0.0, description=_("Base height of the model when Drape to Terrain is off")) # type: ignore
 
     mapmode: EnumProperty(
         name=_("mapmode"),

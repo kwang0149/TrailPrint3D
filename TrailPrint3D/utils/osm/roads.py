@@ -112,8 +112,9 @@ def _compute_half_width(scale_hor: float, multiplier: float) -> tuple[float, boo
     """Return ``(half_width, was_clamped)``.  The caller owns the warning side-effect."""
     width_m = highway_default_width("residential")
     half_width = (width_m * 0.5) * 0.2 * scale_hor * 0.02 * multiplier
-    if half_width < 0.2:
-        return 0.2, True
+    min_half = max(0.0, float(getattr(bpy.context.scene.tp3d, "el_sMinWidthMM", 0.2)))
+    if half_width < min_half:
+        return min_half, True
     return half_width, False
 
 

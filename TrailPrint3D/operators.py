@@ -2155,6 +2155,136 @@ class TP3D_OT_remake_roads(bpy.types.Operator):
         return {'FINISHED'}
 
 
+def _import_model_file(filepath):
+    """Import an STL/OBJ file and return the newly created mesh objects.
+
+    Tries Blender's built-in importers first, falling back to the legacy
+    addon operators. Returns [] on failure.
+    """
+    ext = os.path.splitext(filepath)[1].lower()
+    importers = []
+    if ext == ".stl":
+        importers = [("wm", "stl_import"), ("import_mesh", "stl")]
+    elif ext == ".obj":
+        importers = [("wm", "obj_import"), ("import_scene", "obj")]
+    else:
+        return []
+
+    before = set(bpy.data.objects)
+    for module_name, op_name in importers:
+        try:
+            op_module = getattr(bpy.ops, module_name)
+            op = getattr(op_module, op_name)
+        except AttributeError:
+            continue
+        try:
+            op(filepath=filepath)
+            break
+        except (RuntimeError, TypeError, ValueError) as exc:
+            print(f"[TP3D models] importer {module_name}.{op_name} failed: {exc}")
+    after = set(bpy.data.objects)
+    return [o for o in (after - before) if o.type == 'MESH']
+
+
+class TP3D_OT_import_model_at_gps(bpy.types.Operator):
+    bl_idname = "tp3d.import_model_at_gps"
+    bl_label = "Place 3D Model at GPS"
+    bl_description = "Import an STL/OBJ model (landmark, building...) and place it at the given GPS coordinates on the map"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    filepath: StringProperty(subtype='FILE_PATH')  # type: ignore
+    filter_glob: StringProperty(default="*.stl;*.obj", options={'HIDDEN'})  # type: ignore
+
+    def invoke(self, context, event):
+        context.window_manager.fileselect_add(self)
+        return {'RUNNING_MODAL'}
+
+    def execute(self, context):
+        tp3d = context.scene.tp3d
+        filepath = self.filepath or tp3d.mdlPath
+
+        if not filepath:
+            self.report({'ERROR'}, "Select an STL or OBJ model file first.")
+            return {'CANCELLED'}
+        filepath = bpy.path.abspath(filepath)
+        if not os.path.isfile(filepath):
+            self.report({'ERROR'}, f"Model file not found: {filepath}")
+            return {'CANCELLED'}
+        ext = os.path.splitext(filepath)[1].lower()
+        if ext not in (".stl", ".obj"):
+            self.report({'ERROR'}, "Only STL and OBJ files are supported.")
+            return {'CANCELLED'}
+
+        tp3d.mdlPath = filepath
+
+        xp, yp, _zp = utils.convert_to_blender_coordinates(
+            float(tp3d.mdlLat), float(tp3d.mdlLon), 0, 0
+        )
+
+        new_objects = _import_model_file(filepath)
+        if not new_objects:
+            self.report({'ERROR'}, "Model import failed. Check the console for importer errors.")
+            return {'CANCELLED'}
+
+        bpy.ops.object.select_all(action='DESELECT')
+        for obj in new_objects:
+            obj.select_set(True)
+        context.view_layer.objects.active = new_objects[0]
+        if len(new_objects) > 1:
+            bpy.ops.object.join()
+        model = context.view_layer.objects.active
+
+        # Normalize to a sensible landmark size: the model's largest XY extent
+        # becomes ~10% of the map's footprint, then mdlScale multiplies on top.
+        # STL files are usually in meters with huge bounds, so without this
+        # step an imported landmark would dwarf the whole map.
+        model_scale = tp3d.mdlScale
+        bpy.ops.object.select_all(action='DESELECT')
+        model.select_set(True)
+        context.view_layer.objects.active = model
+        bpy.ops.object.origin_set(type='ORIGIN_GEOMETRY', center='BOUNDS')
+
+        map_obj = tp3d.currentMap
+        map_mm = float(tp3d.objSize)
+        if map_obj and map_obj.name in bpy.data.objects and "objSize" in map_obj:
+            map_mm = float(map_obj["objSize"])
+        world_pts = [model.matrix_world @ v.co for v in model.data.vertices]
+        ext_x = max(p.x for p in world_pts) - min(p.x for p in world_pts)
+        ext_y = max(p.y for p in world_pts) - min(p.y for p in world_pts)
+        max_ext = max(ext_x, ext_y)
+        norm = (map_mm * 0.1) / max_ext if max_ext > 0 else 1.0
+        final_scale = norm * model_scale
+        model.scale = (final_scale, final_scale, final_scale)
+        bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+
+        # Position: GPS XY + terrain-draped Z (or flat height when disabled).
+        model.location = (xp, yp, float(tp3d.mdlHeight))
+
+        if tp3d.mdlDrapeToTerrain:
+            map_obj = tp3d.currentMap
+            if map_obj and map_obj.name in bpy.data.objects:
+                hit_z = utils.RaycastPointToMeshZ((xp, yp, 0), map_obj)
+                if hit_z is not None:
+                    # Model origins sit at the bounds center; find the lowest
+                    # vertex so the model seats ON the surface, not half-buried.
+                    model.select_set(True)
+                    context.view_layer.objects.active = model
+                    lowest = min(
+                        (model.matrix_world @ v.co).z
+                        for v in model.data.vertices
+                    )
+                    model.location.z = model.location.z + hit_z - lowest
+
+        model.name = f"Model_{round(tp3d.mdlLat, 4)}_{round(tp3d.mdlLon, 4)}"
+        from .utils.metadata import writeMetadata
+        writeMetadata(model, type="OTHER")
+        model.select_set(True)
+        context.view_layer.objects.active = model
+
+        self.report({'INFO'}, f"Placed model at ({tp3d.mdlLat}, {tp3d.mdlLon}).")
+        return {'FINISHED'}
+
+
 # ---------------------------------------------------------------------------
 # Map/puzzle picker shared helpers
 #
@@ -2562,6 +2692,13 @@ class TP3D_OT_puzzle_configurator(bpy.types.Operator):
         from .utils.osm import buildings as _bld_utils
         buildings_data = getattr(_bld_utils, '_puzzle_buildings_data', None)
 
+        # landmarks_obj — same intermediate-mesh pattern as buildings.
+        landmarks_obj = bpy.data.objects.get(f"{puzzle_name}_LANDMARKS")
+        if landmarks_obj is not None:
+            bpy.data.objects.remove(landmarks_obj, do_unlink=True)
+        from .utils.osm import landmarks as _lmk_utils
+        landmarks_data = getattr(_lmk_utils, '_puzzle_landmarks_data', None)
+
         # Snap trails against the continuous tile before cutting — avoids raycasting misses in the inter-piece gaps.
         trails = []
         if gpx_paths:
@@ -2570,7 +2707,8 @@ class TP3D_OT_puzzle_configurator(bpy.types.Operator):
 
         overlay.update(0.75, "Cutting puzzle pieces…", f"{len(pieces)} piece(s)…")
         piece_objs, piece_seam_polys = utils.cut_into_puzzle_pieces(
-            blank, pieces, tolerance, roads_data=roads_data, buildings_data=buildings_data
+            blank, pieces, tolerance, roads_data=roads_data, buildings_data=buildings_data,
+            landmarks_data=landmarks_data,
         )
 
         if trails:
