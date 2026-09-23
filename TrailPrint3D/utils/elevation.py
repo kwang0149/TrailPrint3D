@@ -561,15 +561,35 @@ def get_elevation_Mapterhorn(coords, lenv=0, pointsDone=0, zoom=10, progress_cb=
                 elevations[idx] = 0
             continue
 
-        for idx, lat, lon in idx_lat_lon_list:
-            lat_rad = math.radians(lat)
-            n = 2.0 ** actual_zoom
-            px = int(((lon + 180.0) / 360.0 * n * ts) % ts)
-            py = int(((1.0 - math.log(math.tan(lat_rad) + 1.0 / math.cos(lat_rad)) / math.pi) / 2.0 * n * ts) % ts)
+        def _sample(px, py):
             px = min(max(px, 0), ts - 1)
             py = min(max(py, 0), ts - 1)
             r, g, b = rgb_array[py][px]
-            elevations[idx] = terrarium_pixel_to_elevation(r, g, b)
+            return terrarium_pixel_to_elevation(r, g, b)
+
+        for idx, lat, lon in idx_lat_lon_list:
+            lat_rad = math.radians(lat)
+            n = 2.0 ** actual_zoom
+            fx = ((lon + 180.0) / 360.0 * n * ts) % ts
+            fy = ((1.0 - math.log(math.tan(lat_rad) + 1.0 / math.cos(lat_rad)) / math.pi) / 2.0 * n * ts) % ts
+            # Bilinear interpolation between the 4 surrounding pixels -- a bare
+            # int() truncation here (the old behaviour) snaps every vertex to
+            # its nearest source pixel, which is invisible when the mesh is
+            # coarser than the tile's pixel grid but produces hard flat
+            # terraces once mesh vertex density exceeds it (small maps, high
+            # Resolution setting). Edge pixels clamp to the tile edge instead
+            # of fetching the neighbour tile -- an acceptable approximation.
+            x0 = int(math.floor(fx))
+            y0 = int(math.floor(fy))
+            tx = fx - x0
+            ty = fy - y0
+            e00 = _sample(x0, y0)
+            e10 = _sample(x0 + 1, y0)
+            e01 = _sample(x0, y0 + 1)
+            e11 = _sample(x0 + 1, y0 + 1)
+            e0 = e00 * (1 - tx) + e10 * tx
+            e1 = e01 * (1 - tx) + e11 * tx
+            elevations[idx] = e0 * (1 - ty) + e1 * ty
 
     print(f"Mapterhorn: finished. Invalid elevations: {invalidElevations}")
     return elevations

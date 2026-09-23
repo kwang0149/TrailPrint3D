@@ -73,7 +73,10 @@ def create_curve_from_coordinates(coordinates):
 
     mod = curve_object.modifiers.new(name="Remesh",type="REMESH")
     mod.mode = "VOXEL"
-    mod.voxel_size = 0.05 * pathThickness * 10/2
+    # Fine enough to bridge tight switchback loops in a smoothed trail without
+    # leaving the tube fragmented into disconnected islands (the old 0.25x
+    # factor was coarse enough to do that on real GPX traces with switchbacks).
+    mod.voxel_size = pathThickness * 0.0667
     mod.adaptivity = 0.0
     curve_object.data.use_fill_caps = True
 
@@ -117,6 +120,41 @@ def simplify_curve(points_with_extra, min_distance=0.1000):
 
     print(f"Smooth curve: Removed {skipped} vertices")
     return simplified
+
+
+def _smooth_curve_points_pass(points_with_extra, window):
+    n = len(points_with_extra)
+    if n < 3 or window < 3:
+        return points_with_extra
+
+    half = window // 2
+    smoothed = []
+    for i in range(n):
+        lo = max(0, i - half)
+        hi = min(n, i + half + 1)
+        neighborhood = points_with_extra[lo:hi]
+        avg_x = sum(p[0] for p in neighborhood) / len(neighborhood)
+        avg_y = sum(p[1] for p in neighborhood) / len(neighborhood)
+        avg_z = sum(p[2] for p in neighborhood) / len(neighborhood)
+        smoothed.append((avg_x, avg_y, avg_z) + tuple(points_with_extra[i][3:]))
+    return smoothed
+
+
+def smooth_curve_points(points_with_extra, window=5, passes=8):
+    """Repeated small-window smoothing passes to reduce raw GPS jitter.
+
+    A single large window can blend points from opposite sides of a tight
+    switchback/loop together (they're close in the window even though the
+    path only gets there via a long detour), distorting the loop into a
+    self-crossing shape that the trail tube's voxel remesh can't reconnect
+    into one solid -- it fragments into disconnected islands instead. Many
+    passes of a small window only ever blend immediate neighbours, so it
+    can't jump across a loop like that, while still compounding into a
+    strongly smoothed result.
+    """
+    for _ in range(passes):
+        points_with_extra = _smooth_curve_points_pass(points_with_extra, window)
+    return points_with_extra
 
 def create_hexagon(size, num_subdivisions = 1, name = "Hexagon"):
     """Creates a hexagon at (0,0,0), subdivides it, and rotates it by 90 degrees."""

@@ -292,6 +292,7 @@ def _rg_compute_trail_stats(flags, coordinates):
     total_time = 0
     average_speed = 0
     trail_date = ""
+    time_str = ""
     if "stats" in flags:
         total_length    = calculate_total_length(coordinates)
         total_elevation = calculate_total_elevation(coordinates)
@@ -299,18 +300,20 @@ def _rg_compute_trail_stats(flags, coordinates):
         trail_date      = calculate_date(coordinates)
         if total_time is not None and total_time > 0:
             average_speed = total_length / total_time
-            
-    if total_time is not None and total_time > 0:
-        hours = int(total_time)
-        minutes = int((total_time - hours) * 60)
-        time_str = f"{hours}h {minutes}m"
-        tp3d = bpy.context.scene.tp3d
-        tp3d.sTime_str      = time_str
-        tp3d.total_length   = total_length
-        tp3d.total_elevation = total_elevation
-        tp3d.total_time     = total_time
-        tp3d.average_speed  = average_speed
-        tp3d.trail_date     = trail_date
+            hours = int(total_time)
+            minutes = int((total_time - hours) * 60)
+            time_str = f"{hours}h {minutes}m"
+
+    # Length/elevation come straight from GPX coordinates and don't depend on
+    # timestamps -- write them even when the GPX has no <time> tags (total_time
+    # stays 0 in that case, so duration/speed correctly fall back to empty/0).
+    tp3d = bpy.context.scene.tp3d
+    tp3d.sTime_str      = time_str
+    tp3d.total_length   = total_length
+    tp3d.total_elevation = total_elevation
+    tp3d.total_time     = total_time
+    tp3d.average_speed  = average_speed
+    tp3d.trail_date     = trail_date
 
 
 def _rg_create_map_object(flags, props, modelname, centerx, centery):
@@ -857,8 +860,13 @@ def _rg_apply_single_color_mode(obj, curveObjs, terrain, props):
             cs = [o.matrix_world @ Vector(c) for c in o.bound_box]
             return min(c.x for c in cs), max(c.x for c in cs), min(c.y for c in cs), max(c.y for c in cs)
         tx0, tx1, ty0, ty1 = _tile_extents(obj)
+        # view_layer.objects can transiently hand back a stale/invalid entry right
+        # after the EDIT/OBJECT mode_set flurry the OUTER TEXT plate build does
+        # (HexagonOuterText et al.) with no view-layer update in between -- guard
+        # against that instead of crashing on _ob.name.
+        bpy.context.view_layer.update()
         for _ob in bpy.context.view_layer.objects:
-            if '_Trail' not in _ob.name or _ob.type != 'CURVE':
+            if _ob is None or '_Trail' not in _ob.name or _ob.type != 'CURVE':
                 continue
             cx0, cx1, cy0, cy1 = _tile_extents(_ob)
             if cx0 > tx1 or cx1 < tx0 or cy0 > ty1 or cy1 < ty0:
@@ -1398,6 +1406,7 @@ def runGeneration(type, locked_scale=None):
     from .primitives import (  # deferred to avoid circular import at load time
         create_curve_from_coordinates,
         simplify_curve,
+        smooth_curve_points,
     )
     from .scene import (  # deferred to avoid circular import at load time
         remove_objects,
@@ -1599,17 +1608,17 @@ def runGeneration(type, locked_scale=None):
         if _g_slopes:
             _avg_g = sum(_g_slopes) / len(_g_slopes)
             print(f"[DEBUG] GPX avg slope:     {_avg_g:.4f}  ({math.degrees(math.atan(_avg_g)):.2f}°)")
-    blender_coords = simplify_curve(blender_coords, .12)
+    blender_coords = smooth_curve_points(simplify_curve(blender_coords, .12))
     print("Removing duplicates")
     blender_coords = separate_duplicate_xy(blender_coords, 0.05)
     if ("separate_paths" in flags or len(separate_paths) > 1) and "trail_map" not in flags:
         blender_coords_separate = [
-            separate_duplicate_xy(simplify_curve(convert_to_blender_coordinates_batch(path), .12), 0.05)
+            separate_duplicate_xy(smooth_curve_points(simplify_curve(convert_to_blender_coordinates_batch(path), .12)), 0.05)
             for path in separate_paths
         ]
     if separate_paths_by_file and "trail_map" not in flags:
         blender_coords_by_file = [
-            [separate_duplicate_xy(simplify_curve(convert_to_blender_coordinates_batch(seg), .12), 0.05) for seg in file_segs]
+            [separate_duplicate_xy(smooth_curve_points(simplify_curve(convert_to_blender_coordinates_batch(seg), .12)), 0.05) for seg in file_segs]
             for file_segs in separate_paths_by_file
         ]
 
@@ -2365,6 +2374,7 @@ def generateJustTrail(material="TRAIL"):
     from .primitives import (  # deferred to avoid circular import at load time
         create_curve_from_coordinates,
         simplify_curve,
+        smooth_curve_points,
     )
     from .scene import (
         show_message_box,  # deferred to avoid circular import at load time
@@ -2402,7 +2412,7 @@ def generateJustTrail(material="TRAIL"):
             for path in separate_paths
             ]
 
-    blender_coords = simplify_curve(blender_coords, .12)
+    blender_coords = smooth_curve_points(simplify_curve(blender_coords, .12))
 
     #PREVENT CLIPPING OF IDENTICAL COORDINATES
     blender_coords = separate_duplicate_xy(blender_coords, 0.05)
